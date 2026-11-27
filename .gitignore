@@ -1,0 +1,29 @@
+# Dépendances et builds
+node_modules/
+dist/
+dist-ssr/
+build/
+
+# Rapports générés (couverture, tests)
+coverage/
+.nyc_output/
+reports/
+
+# Variables d'environnement (secrets)
+.env
+.env.*
+!.env.example
+
+# Fichiers téléversés en local
+uploads/
+
+# Logs
+logs/
+*.log
+
+# Éditeurs et système
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
