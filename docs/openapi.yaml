@@ -1,0 +1,532 @@
+openapi: 3.0.3
+info:
+  title: DataShare API
+  version: 0.1.0
+  description: |
+    Contrat d'interface entre le front-end React et le back-end NestJS de DataShare,
+    plateforme de transfert de fichiers par lien temporaire.
+
+    - Les endpoints marqués 🔒 exigent un JWT (`Authorization: Bearer <token>`).
+    - Toutes les erreurs suivent le schéma `Error`.
+    - Les fonctionnalités optionnelles (US07 à US10) sont signalées par « (option) ».
+
+servers:
+  - url: http://localhost:3000/api
+    description: Développement local
+
+tags:
+  - name: Auth
+    description: Création de compte et connexion (US03, US04)
+  - name: Files
+    description: Fichiers de l'utilisateur connecté (US01, US05, US06, US08)
+  - name: Download
+    description: Téléchargement public via un lien (US02, US09)
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Créer un compte (US03)
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Compte créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Email déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 409
+                error: Conflict
+                message: Cet email est déjà utilisé.
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Se connecter (US04)
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Connexion réussie, JWT renvoyé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          description: Email ou mot de passe incorrect (message volontairement identique dans les deux cas)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 401
+                error: Unauthorized
+                message: Email ou mot de passe incorrect.
+
+  /files:
+    get:
+      tags: [Files]
+      summary: 🔒 Historique de mes fichiers (US05)
+      operationId: listMyFiles
+      parameters:
+        - name: status
+          in: query
+          description: Filtre des maquettes « Tous / Actifs / Expirés ». Par défaut, seuls les fichiers actifs (US06).
+          schema:
+            type: string
+            enum: [all, active, expired]
+            default: active
+        - name: tag
+          in: query
+          description: (option, US08) Ne garder que les fichiers portant ce tag.
+          schema:
+            type: string
+            maxLength: 30
+      responses:
+        '200':
+          description: Liste des fichiers de l'utilisateur, du plus récent au plus ancien
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FileSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Files]
+      summary: Téléverser un fichier (US01 ; anonyme en option US07)
+      description: |
+        Avec un JWT, le fichier est rattaché à l'utilisateur (US01).
+        Sans JWT, l'envoi est anonyme (US07, option) : pas d'historique ni de suppression.
+
+        Limites : 1 Go maximum, extensions exécutables refusées (.exe, .bat, .cmd, .sh, .msi, .com, .scr, .js, .vbs, .ps1, .jar).
+      operationId: uploadFile
+      security:
+        - bearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+            encoding:
+              tags:
+                style: form
+                explode: true
+      responses:
+        '201':
+          description: Fichier enregistré, lien de téléchargement généré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '413':
+          description: Fichier trop volumineux (plus de 1 Go)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 413
+                error: Payload Too Large
+                message: Le fichier dépasse la taille maximale de 1 Go.
+        '415':
+          description: Type de fichier interdit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 415
+                error: Unsupported Media Type
+                message: Ce type de fichier n'est pas autorisé.
+
+  /files/{id}:
+    parameters:
+      - $ref: '#/components/parameters/FileId'
+    delete:
+      tags: [Files]
+      summary: 🔒 Supprimer un de mes fichiers (US06)
+      description: Suppression physique et irréversible du fichier et de ses métadonnées.
+      operationId: deleteFile
+      responses:
+        '204':
+          description: Fichier supprimé
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/FileNotFound'
+
+  /files/{id}/tags:
+    parameters:
+      - $ref: '#/components/parameters/FileId'
+    put:
+      tags: [Files]
+      summary: 🔒 (option) Remplacer les tags d'un fichier (US08)
+      operationId: setFileTags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags:
+                  $ref: '#/components/schemas/Tags'
+      responses:
+        '200':
+          description: Tags mis à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileSummary'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/FileNotFound'
+
+  /download/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: Token public du lien de téléchargement
+        schema:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+    get:
+      tags: [Download]
+      summary: Métadonnées d'un fichier avant téléchargement (US02)
+      operationId: getDownloadInfo
+      security: []
+      responses:
+        '200':
+          description: Lien valide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadInfo'
+        '404':
+          $ref: '#/components/responses/LinkNotFound'
+        '410':
+          $ref: '#/components/responses/LinkExpired'
+
+    post:
+      tags: [Download]
+      summary: Télécharger le fichier (US02 ; mot de passe en option US09)
+      description: |
+        POST plutôt que GET pour transmettre le mot de passe dans le corps de la requête,
+        et non dans l'URL (qui finit dans l'historique du navigateur et les logs).
+      operationId: downloadFile
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: Requis seulement si le fichier est protégé
+      responses:
+        '200':
+          description: Contenu du fichier
+          headers:
+            Content-Disposition:
+              description: 'attachment; filename="<nom d''origine>"'
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Mot de passe manquant ou incorrect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 401
+                error: Unauthorized
+                message: Mot de passe incorrect.
+        '404':
+          $ref: '#/components/responses/LinkNotFound'
+        '410':
+          $ref: '#/components/responses/LinkExpired'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FileId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: 8 caractères minimum (72 maximum, limite de bcrypt)
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    LoginResponse:
+      type: object
+      required: [accessToken, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+          description: JWT à envoyer dans l'en-tête Authorization
+        expiresIn:
+          type: integer
+          description: Durée de validité du JWT, en secondes
+          example: 3600
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      required: [id, email, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+
+    Tags:
+      type: array
+      description: (option, US08) Tags libres, sans doublon
+      uniqueItems: true
+      maxItems: 20
+      items:
+        type: string
+        minLength: 1
+        maxLength: 30
+
+    UploadRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: 1 Go maximum
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 7
+          default: 7
+          description: Durée de validité du lien, en jours
+        password:
+          type: string
+          format: password
+          minLength: 6
+          description: (option, US09) Protège le téléchargement
+        tags:
+          $ref: '#/components/schemas/Tags'
+
+    UploadResponse:
+      type: object
+      required: [id, token, downloadUrl, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        token:
+          type: string
+        downloadUrl:
+          type: string
+          format: uri
+          example: http://localhost:5173/download/8fJ2kQ...
+        expiresAt:
+          type: string
+          format: date-time
+
+    FileSummary:
+      type: object
+      required: [id, originalName, sizeBytes, uploadedAt, expiresAt, status, downloadUrl, passwordProtected, tags]
+      properties:
+        id:
+          type: string
+          format: uuid
+        originalName:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        uploadedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, expired]
+          description: Calculé à partir de expiresAt (non stocké)
+        downloadUrl:
+          type: string
+          format: uri
+        passwordProtected:
+          type: boolean
+        tags:
+          $ref: '#/components/schemas/Tags'
+
+    DownloadInfo:
+      type: object
+      required: [originalName, mimeType, sizeBytes, expiresAt, passwordProtected]
+      properties:
+        originalName:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        expiresAt:
+          type: string
+          format: date-time
+        passwordProtected:
+          type: boolean
+
+    Error:
+      type: object
+      required: [statusCode, error, message]
+      properties:
+        statusCode:
+          type: integer
+        error:
+          type: string
+        message:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Message lisible, ou liste de messages pour les erreurs de validation
+
+  responses:
+    ValidationError:
+      description: Données invalides
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 400
+            error: Bad Request
+            message: ['password must be longer than or equal to 8 characters']
+    Unauthorized:
+      description: JWT absent, invalide ou expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Le fichier appartient à un autre utilisateur
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    FileNotFound:
+      description: Fichier introuvable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    LinkNotFound:
+      description: Lien invalide (aucun fichier pour ce token)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 404
+            error: Not Found
+            message: Ce lien de téléchargement n'existe pas.
+    LinkExpired:
+      description: Lien expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 410
+            error: Gone
+            message: Ce lien a expiré, le fichier n'est plus disponible.
+
+security:
+  - bearerAuth: []
