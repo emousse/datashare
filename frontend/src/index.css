@@ -1,0 +1,15 @@
+/* Styles de base provisoires : la charte des maquettes Figma arrive à l'étape 3. */
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  color: #1f1f1f;
+  background-color: #fff;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  padding: 2rem;
+}
